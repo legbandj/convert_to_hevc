@@ -34,7 +34,8 @@ Optional flags:
 Tip: Run with --dry-run first to verify which files will be touched before committing to the conversion.
 
 
-Here's what's new in the updated script:
+### Here's what's new in the updated script:
+
 Live progress bar — uses ffmpeg's `-progress pipe:2` flag to receive structured `key=value` updates from ffmpeg in real time. Each update redraws a 3-line block in place:
 
 ```
@@ -42,6 +43,7 @@ Live progress bar — uses ffmpeg's `-progress pipe:2` flag to receive structure
   ████████████████░░░░░░░░░░░░░░  52.3%
   Elapsed 00:42  ETA 00:38  Speed 1.43x
 ```
+
 Other improvements:
 
 - Pre-scan phase — probes all files first and prints a summary (`3 file(s) to convert, 2 skipped`) before any conversion starts
