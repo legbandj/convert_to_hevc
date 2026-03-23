@@ -5,8 +5,6 @@ Shows a live progress bar for each file being converted.
 
 Usage: python convert_to_hevc.py [directory]
        Defaults to current directory if no argument is given.
-
-Requires: Python 3.10 or newer
 """
 
 import os
@@ -18,6 +16,8 @@ import tempfile
 import argparse
 import signal
 import time
+import logging
+from datetime import datetime
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".ts", ".mts", ".m2ts"}
@@ -34,6 +34,25 @@ RED    = lambda t: _c("31", t)
 CYAN   = lambda t: _c("36", t)
 BOLD   = lambda t: _c("1",  t)
 DIM    = lambda t: _c("2",  t)
+
+
+# ── logger ───────────────────────────────────────────────────────────────────
+
+# Module-level logger; configured in main() if --log-file is supplied.
+log: logging.Logger = logging.getLogger("convert_to_hevc")
+log.addHandler(logging.NullHandler())   # silent by default
+
+
+def setup_logger(log_path: str) -> None:
+    """Attach a file handler that writes plain-text (no ANSI) log entries."""
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(
+        fmt="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    log.setLevel(logging.DEBUG)
+    log.addHandler(handler)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -150,7 +169,7 @@ def convert_to_hevc(
     cmd = [
         "ffmpeg", "-y",
         "-i", filepath,
-        "-c:v", "hevc_nvenc",    # was libx265, changed to hvec_nvenc
+        "-c:v", "libx265",
         "-crf", str(crf),
         "-preset", preset,
         "-c:a", "copy",
@@ -237,14 +256,19 @@ def convert_to_hevc(
 
     if return_code != 0:
         print(RED(f"  [ERROR] ffmpeg exited with code {return_code}"))
-        # Show the last meaningful stderr lines for diagnosis
-        tail = [l for l in stderr_buf
-                if l and not l.startswith((
-                    "frame=", "fps=", "out_time", "speed=", "progress",
-                    "bitrate", "total_size", "dup_frames", "drop_frames", "stream_"
-                ))][-10:]
+        # Filter noisy progress lines; keep only human-readable diagnostic lines
+        meaningful = [l for l in stderr_buf
+                      if l and not l.startswith((
+                          "frame=", "fps=", "out_time", "speed=", "progress",
+                          "bitrate", "total_size", "dup_frames", "drop_frames", "stream_"
+                      ))]
+        tail = meaningful[-10:]
         for l in tail:
             print(DIM(f"    {l}"))
+        # Write full ffmpeg output to the log file for post-mortem analysis
+        log.error("Conversion FAILED: %s  (ffmpeg exit code %d)", filepath, return_code)
+        for l in meaningful:
+            log.error("  ffmpeg: %s", l)
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
         return False
@@ -255,6 +279,8 @@ def convert_to_hevc(
     elapsed_total = time.monotonic() - start_time
     print(GREEN(f"  ✔  Done in {_format_eta(elapsed_total)}  "
                 f"{size_before} → {size_after}"))
+    log.info("OK  %s  (%s → %s)  elapsed %s",
+             filepath, size_before, size_after, _format_eta(elapsed_total))
     return True
 
 
@@ -263,10 +289,12 @@ def convert_to_hevc(
 def scan_and_convert(directory: str, crf: int, preset: str, dry_run: bool) -> None:
     if not os.path.isdir(directory):
         print(RED(f"[ERROR] Not a directory: {directory}"))
+        log.error("Not a directory: %s", directory)
         sys.exit(1)
 
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         print(RED("[ERROR] ffmpeg / ffprobe not found. Please install ffmpeg."))
+        log.error("ffmpeg / ffprobe not found")
         sys.exit(1)
 
     entries    = sorted(os.listdir(directory))
@@ -300,6 +328,7 @@ def scan_and_convert(directory: str, crf: int, preset: str, dry_run: bool) -> No
 
     for fname, reason in to_skip:
         print(DIM(f"  [skip] {fname}  ({reason})"))
+        log.info("SKIP  %s  (%s)", fname, reason)
     if to_skip:
         print()
 
@@ -329,6 +358,8 @@ def scan_and_convert(directory: str, crf: int, preset: str, dry_run: bool) -> No
                f"{GREEN(str(converted))} converted, "
                f"{(RED(str(errors)) if errors else DIM('0'))} errors")
     print(BOLD(summary))
+    log.info("Run complete — converted: %d  errors: %d  skipped: %d",
+             converted, errors, len(to_skip))
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
@@ -361,11 +392,25 @@ def main() -> None:
         action="store_true",
         help="List files that would be converted without converting them",
     )
+    parser.add_argument(
+        "--log-file",
+        metavar="PATH",
+        default=None,
+        help="Append errors (and a run summary) to a log file",
+    )
     args = parser.parse_args()
+
+    if args.log_file:
+        setup_logger(args.log_file)
+        log.info("=" * 60)
+        log.info("Session started  •  directory: %s  •  CRF %d  •  preset %s%s",
+                 os.path.abspath(args.directory), args.crf, args.preset,
+                 "  •  DRY RUN" if args.dry_run else "")
 
     print(BOLD(f"convert_to_hevc  •  {os.path.abspath(args.directory)}"))
     print(DIM(f"CRF {args.crf}  •  preset {args.preset}"
-              + ("  •  DRY RUN" if args.dry_run else "")))
+              + ("  •  DRY RUN" if args.dry_run else "")
+              + (f"  •  log → {args.log_file}" if args.log_file else "")))
     print()
 
     scan_and_convert(args.directory, crf=args.crf, preset=args.preset,

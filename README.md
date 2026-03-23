@@ -52,3 +52,28 @@ Other improvements:
 - Color output — green/yellow/red/dim highlights that auto-disable when piping to a file or non-TTY
 - Clean Ctrl-C handling — kills ffmpeg gracefully and clears the progress block instead of leaving a half-drawn bar
 - Better error output — filters out the noisy ffmpeg progress lines and shows only the relevant error messages on failure
+
+
+Adding logging function:
+python convert_to_hevc.py /path/to/videos --log-file conversion.log
+```
+
+**What gets logged:**
+
+| Event | Level |
+|---|---|
+| Session start (directory, CRF, preset) | `INFO` |
+| Skipped files (and why) | `INFO` |
+| Successful conversions (sizes, elapsed time) | `INFO` |
+| ffmpeg failures (exit code + full diagnostic output) | `ERROR` |
+| Run summary (converted / errors / skipped counts) | `INFO` |
+
+**Example log output:**
+```
+2026-03-22 14:01:00  INFO      ============================================================
+2026-03-22 14:01:00  INFO      Session started  •  directory: /videos  •  CRF 28  •  preset medium
+2026-03-22 14:01:01  INFO      SKIP  holiday.mp4  (hevc)
+2026-03-22 14:02:45  INFO      OK  /videos/clip.mp4  (1.2 GB → 820.4 MB)  elapsed 01:44
+2026-03-22 14:03:10  ERROR     Conversion FAILED: /videos/broken.mp4  (ffmpeg exit code 1)
+2026-03-22 14:03:10  ERROR       ffmpeg: Invalid data found when processing input
+2026-03-22 14:03:10  INFO      Run complete — converted: 1  errors: 1  skipped: 1
