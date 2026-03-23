@@ -110,3 +110,24 @@ The output makes it clear what was deferred:
 Finished — 5 converted, 0 errors  (18 file(s) deferred — re-run to continue)
 
 This pairs well with a cron job or Task Scheduler entry if you want to spread encoding across low-activity windows — just run with `--batch 5` nightly until the directory is fully converted. `--dry-run --batch N` also works to preview exactly which files would be picked up.
+
+added:
+Use --recurse (or the shorthand -r):
+```
+python convert_to_hevc.py /path/to/videos --recurse
+```
+It works with all other flags too — for example, a recursive dry-run with a batch limit:
+```
+python convert_to_hevc.py /media/library --recurse --batch 10 --dry-run
+```
+
+A couple of implementation details worth noting:
+
+**Ordering** — subdirectories are walked alphabetically and files within each directory are also sorted alphabetically, so the order is consistent and predictable across runs. This means `--batch` behaves reliably for incremental processing: each run picks up the next N files in the same deterministic order.
+
+**Display** — skip and convert lines now show the relative path from the root directory rather than just the bare filename, so you can tell at a glance which subfolder each file belongs to:
+```
+  [skip] Movies/oldfilm.mp4  (hevc)
+  [skip] TV/Show/ep01.mkv   (av1)
+Converting (1/4): TV/Show/ep02.mkv
+```

@@ -310,10 +310,27 @@ def convert_to_hevc(
     return True
 
 
+def collect_candidates(directory: str, recurse: bool) -> list[str]:
+    """Return a sorted list of video file paths under directory."""
+    matches = []
+    if recurse:
+        for root, dirs, files in os.walk(directory):
+            dirs.sort()   # walk subdirectories in alphabetical order
+            for fname in sorted(files):
+                if os.path.splitext(fname)[1].lower() in VIDEO_EXTENSIONS:
+                    matches.append(os.path.join(root, fname))
+    else:
+        for fname in sorted(os.listdir(directory)):
+            fpath = os.path.join(directory, fname)
+            if os.path.isfile(fpath) and os.path.splitext(fname)[1].lower() in VIDEO_EXTENSIONS:
+                matches.append(fpath)
+    return matches
+
+
 # ── scanner ───────────────────────────────────────────────────────────────────
 
 def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
-                     dry_run: bool, batch_size: int | None) -> None:
+                     dry_run: bool, batch_size: int | None, recurse: bool) -> None:
     if not os.path.isdir(directory):
         print(RED(f"[ERROR] Not a directory: {directory}"))
         log.error("Not a directory: %s", directory)
@@ -324,12 +341,7 @@ def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
         log.error("ffmpeg / ffprobe not found")
         sys.exit(1)
 
-    entries    = sorted(os.listdir(directory))
-    candidates = [
-        os.path.join(directory, f)
-        for f in entries
-        if os.path.splitext(f)[1].lower() in VIDEO_EXTENSIONS
-    ]
+    candidates = collect_candidates(directory, recurse)
 
     if not candidates:
         print("No video files found.")
@@ -341,12 +353,12 @@ def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
 
     print("Scanning files…")
     for filepath in candidates:
-        info  = get_video_info(filepath)
-        fname = os.path.basename(filepath)
+        info     = get_video_info(filepath)
+        rel_path = os.path.relpath(filepath, directory)
         if info["codec"] is None:
-            to_skip.append((fname, "unreadable"))
+            to_skip.append((rel_path, "unreadable"))
         elif info["codec"].lower() not in ("h264", "avc"):
-            to_skip.append((fname, info["codec"]))
+            to_skip.append((rel_path, info["codec"]))
         else:
             to_convert.append((filepath, info["duration"]))
 
@@ -431,6 +443,11 @@ def main() -> None:
         help="Encoding speed/compression preset (default: medium)",
     )
     parser.add_argument(
+        "--recurse", "-r",
+        action="store_true",
+        help="Recurse into subdirectories",
+    )
+    parser.add_argument(
         "--batch",
         metavar="N",
         type=int,
@@ -472,21 +489,24 @@ def main() -> None:
     if args.log_file:
         setup_logger(args.log_file)
         log.info("=" * 60)
-        log.info("Session started  •  directory: %s  •  encoder: %s  •  CRF/QP %d  •  preset %s%s%s",
+        log.info("Session started  •  directory: %s  •  encoder: %s  •  CRF/QP %d  •  preset %s%s%s%s",
                  os.path.abspath(args.directory), encoder, args.crf, args.preset,
+                 "  •  recurse" if args.recurse else "",
                  f"  •  batch {args.batch}" if args.batch else "",
                  "  •  DRY RUN" if args.dry_run else "")
 
     print(BOLD(f"convert_to_hevc  •  {os.path.abspath(args.directory)}"))
     encoder_label = YELLOW("hevc_nvenc (GPU)") if encoder == "hevc_nvenc" else "libx265 (CPU)"
     print(DIM(f"encoder {encoder_label}  •  CRF/QP {args.crf}  •  preset {args.preset}"
+              + ("  •  recurse" if args.recurse else "")
               + (f"  •  batch {args.batch}" if args.batch else "")
               + ("  •  DRY RUN" if args.dry_run else "")
               + (f"  •  log → {args.log_file}" if args.log_file else "")))
     print()
 
     scan_and_convert(args.directory, crf=args.crf, preset=args.preset,
-                     encoder=encoder, dry_run=args.dry_run, batch_size=args.batch)
+                     encoder=encoder, dry_run=args.dry_run, batch_size=args.batch,
+                     recurse=args.recurse)
 
 
 if __name__ == "__main__":
