@@ -55,6 +55,18 @@ def setup_logger(log_path: str) -> None:
     log.addHandler(handler)
 
 
+def check_nvenc_available() -> bool:
+    """Return True if ffmpeg was built with hevc_nvenc support."""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, check=True,
+        )
+        return "hevc_nvenc" in result.stdout
+    except subprocess.CalledProcessError:
+        return False
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def get_video_info(filepath: str) -> dict:
@@ -151,6 +163,7 @@ def convert_to_hevc(
     duration: float,
     crf: int,
     preset: str,
+    encoder: str,
     file_index: int,
     file_total: int,
 ) -> bool:
@@ -166,12 +179,25 @@ def convert_to_hevc(
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tmp" + ext, dir=directory)
     os.close(tmp_fd)
 
+    # Build encoder-specific arguments.
+    # nvenc uses -qp (constant QP) instead of -crf, and has its own preset names.
+    if encoder == "hevc_nvenc":
+        enc_args = [
+            "-c:v", "hevc_nvenc",
+            "-qp", str(crf),       # nvenc quality knob closest to CRF
+            "-preset", "p4",       # nvenc balanced preset (p1=fastest … p7=slowest)
+        ]
+    else:
+        enc_args = [
+            "-c:v", "libx265",
+            "-crf", str(crf),
+            "-preset", preset,
+        ]
+
     cmd = [
         "ffmpeg", "-y",
         "-i", filepath,
-        "-c:v", "libx265",
-        "-crf", str(crf),
-        "-preset", preset,
+        *enc_args,
         "-c:a", "copy",
         "-c:s", "copy",
         "-map", "0",
@@ -279,14 +305,14 @@ def convert_to_hevc(
     elapsed_total = time.monotonic() - start_time
     print(GREEN(f"  ✔  Done in {_format_eta(elapsed_total)}  "
                 f"{size_before} → {size_after}"))
-    log.info("OK  %s  (%s → %s)  elapsed %s",
-             filepath, size_before, size_after, _format_eta(elapsed_total))
+    log.info("OK  %s  (%s → %s)  elapsed %s  encoder %s",
+             filepath, size_before, size_after, _format_eta(elapsed_total), encoder)
     return True
 
 
 # ── scanner ───────────────────────────────────────────────────────────────────
 
-def scan_and_convert(directory: str, crf: int, preset: str, dry_run: bool) -> None:
+def scan_and_convert(directory: str, crf: int, preset: str, encoder: str, dry_run: bool) -> None:
     if not os.path.isdir(directory):
         print(RED(f"[ERROR] Not a directory: {directory}"))
         log.error("Not a directory: %s", directory)
@@ -347,7 +373,7 @@ def scan_and_convert(directory: str, crf: int, preset: str, dry_run: bool) -> No
         fname = os.path.basename(filepath)
         print(BOLD(f"Converting ({idx}/{total}): {fname}"))
         ok = convert_to_hevc(filepath, duration, crf=crf, preset=preset,
-                             file_index=idx, file_total=total)
+                             encoder=encoder, file_index=idx, file_total=total)
         if ok:
             converted += 1
         else:
@@ -393,6 +419,11 @@ def main() -> None:
         help="List files that would be converted without converting them",
     )
     parser.add_argument(
+        "--nvenc",
+        action="store_true",
+        help="Use NVIDIA GPU encoder (hevc_nvenc) instead of libx265",
+    )
+    parser.add_argument(
         "--log-file",
         metavar="PATH",
         default=None,
@@ -400,21 +431,32 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Resolve encoder
+    if args.nvenc:
+        if not check_nvenc_available():
+            print(RED("[ERROR] hevc_nvenc is not available in your ffmpeg build."))
+            print(DIM("        Install an ffmpeg build with NVIDIA GPU support, or omit --nvenc."))
+            sys.exit(1)
+        encoder = "hevc_nvenc"
+    else:
+        encoder = "libx265"
+
     if args.log_file:
         setup_logger(args.log_file)
         log.info("=" * 60)
-        log.info("Session started  •  directory: %s  •  CRF %d  •  preset %s%s",
-                 os.path.abspath(args.directory), args.crf, args.preset,
+        log.info("Session started  •  directory: %s  •  encoder: %s  •  CRF/QP %d  •  preset %s%s",
+                 os.path.abspath(args.directory), encoder, args.crf, args.preset,
                  "  •  DRY RUN" if args.dry_run else "")
 
     print(BOLD(f"convert_to_hevc  •  {os.path.abspath(args.directory)}"))
-    print(DIM(f"CRF {args.crf}  •  preset {args.preset}"
+    encoder_label = YELLOW("hevc_nvenc (GPU)") if encoder == "hevc_nvenc" else "libx265 (CPU)"
+    print(DIM(f"encoder {encoder_label}  •  CRF/QP {args.crf}  •  preset {args.preset}"
               + ("  •  DRY RUN" if args.dry_run else "")
               + (f"  •  log → {args.log_file}" if args.log_file else "")))
     print()
 
     scan_and_convert(args.directory, crf=args.crf, preset=args.preset,
-                     dry_run=args.dry_run)
+                     encoder=encoder, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

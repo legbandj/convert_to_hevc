@@ -77,3 +77,19 @@ python convert_to_hevc.py /path/to/videos --log-file conversion.log
 2026-03-22 14:03:10  ERROR     Conversion FAILED: /videos/broken.mp4  (ffmpeg exit code 1)
 2026-03-22 14:03:10  ERROR       ffmpeg: Invalid data found when processing input
 2026-03-22 14:03:10  INFO      Run complete — converted: 1  errors: 1  skipped: 1
+
+added optional nvenc:
+python convert_to_hevc.py /path/to/videos --nvenc
+```
+
+A few things worth knowing about the implementation:
+
+**Availability check** — before any conversion starts, the script probes `ffmpeg -encoders` to confirm `hevc_nvenc` is actually present. If it's not (e.g. you're on a CPU-only ffmpeg build), it exits immediately with a clear error rather than failing mid-batch.
+
+**Quality parameter** — nvenc doesn't support `-crf` the way libx265 does, so the script maps it to `-qp` instead, which is the closest equivalent. The same `--crf` value you'd use for libx265 works as a reasonable starting point for nvenc too, though nvenc tends to be less efficient so you may want a slightly lower number (higher quality) like `--crf 24`.
+
+**Preset** — nvenc uses its own preset scale (`p1` fastest through `p7` slowest), which is different from libx265's named presets. The script pins nvenc to `p4` (balanced) regardless of `--preset`, since the two scales aren't directly comparable. The `--preset` flag still applies normally when using libx265.
+
+**Header display** — the encoder is shown in the startup line so it's always clear which path is being used:
+```
+encoder hevc_nvenc (GPU)  •  CRF/QP 28  •  preset medium
