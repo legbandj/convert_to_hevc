@@ -312,7 +312,8 @@ def convert_to_hevc(
 
 # ── scanner ───────────────────────────────────────────────────────────────────
 
-def scan_and_convert(directory: str, crf: int, preset: str, encoder: str, dry_run: bool) -> None:
+def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
+                     dry_run: bool, batch_size: int | None) -> None:
     if not os.path.isdir(directory):
         print(RED(f"[ERROR] Not a directory: {directory}"))
         log.error("Not a directory: %s", directory)
@@ -361,9 +362,22 @@ def scan_and_convert(directory: str, crf: int, preset: str, encoder: str, dry_ru
     if not to_convert:
         return
 
+    # Apply batch limit
+    total_eligible = len(to_convert)
+    if batch_size is not None and batch_size < total_eligible:
+        to_convert = to_convert[:batch_size]
+        remaining  = total_eligible - batch_size
+        print(YELLOW(f"  Batch limit: processing {batch_size} of {total_eligible} "
+                     f"eligible file(s)  ({remaining} remaining for next run)"))
+        log.info("Batch limit %d applied — %d of %d eligible files queued, %d deferred",
+                 batch_size, batch_size, total_eligible, remaining)
+        print()
+
     if dry_run:
         for fp, _ in to_convert:
             print(YELLOW(f"  [dry-run] {os.path.basename(fp)}"))
+        if batch_size is not None and batch_size < total_eligible:
+            print(DIM(f"  (+ {total_eligible - batch_size} more deferred by --batch)"))
         return
 
     converted = errors = 0
@@ -383,9 +397,12 @@ def scan_and_convert(directory: str, crf: int, preset: str, encoder: str, dry_ru
     summary = (f"Finished — "
                f"{GREEN(str(converted))} converted, "
                f"{(RED(str(errors)) if errors else DIM('0'))} errors")
+    if batch_size is not None and batch_size < total_eligible:
+        summary += f"  ({total_eligible - batch_size} file(s) deferred — re-run to continue)"
     print(BOLD(summary))
-    log.info("Run complete — converted: %d  errors: %d  skipped: %d",
-             converted, errors, len(to_skip))
+    log.info("Run complete — converted: %d  errors: %d  skipped: %d  deferred: %d",
+             converted, errors, len(to_skip),
+             max(0, total_eligible - len(to_convert)))
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
@@ -412,6 +429,13 @@ def main() -> None:
         choices=["ultrafast", "superfast", "veryfast", "faster", "fast",
                  "medium", "slow", "slower", "veryslow"],
         help="Encoding speed/compression preset (default: medium)",
+    )
+    parser.add_argument(
+        "--batch",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Stop after converting N files (useful for scheduled/incremental runs)",
     )
     parser.add_argument(
         "--dry-run",
@@ -441,22 +465,28 @@ def main() -> None:
     else:
         encoder = "libx265"
 
+    if args.batch is not None and args.batch < 1:
+        print(RED("[ERROR] --batch must be a positive integer."))
+        sys.exit(1)
+
     if args.log_file:
         setup_logger(args.log_file)
         log.info("=" * 60)
-        log.info("Session started  •  directory: %s  •  encoder: %s  •  CRF/QP %d  •  preset %s%s",
+        log.info("Session started  •  directory: %s  •  encoder: %s  •  CRF/QP %d  •  preset %s%s%s",
                  os.path.abspath(args.directory), encoder, args.crf, args.preset,
+                 f"  •  batch {args.batch}" if args.batch else "",
                  "  •  DRY RUN" if args.dry_run else "")
 
     print(BOLD(f"convert_to_hevc  •  {os.path.abspath(args.directory)}"))
     encoder_label = YELLOW("hevc_nvenc (GPU)") if encoder == "hevc_nvenc" else "libx265 (CPU)"
     print(DIM(f"encoder {encoder_label}  •  CRF/QP {args.crf}  •  preset {args.preset}"
+              + (f"  •  batch {args.batch}" if args.batch else "")
               + ("  •  DRY RUN" if args.dry_run else "")
               + (f"  •  log → {args.log_file}" if args.log_file else "")))
     print()
 
     scan_and_convert(args.directory, crf=args.crf, preset=args.preset,
-                     encoder=encoder, dry_run=args.dry_run)
+                     encoder=encoder, dry_run=args.dry_run, batch_size=args.batch)
 
 
 if __name__ == "__main__":

@@ -93,3 +93,20 @@ A few things worth knowing about the implementation:
 **Header display** — the encoder is shown in the startup line so it's always clear which path is being used:
 ```
 encoder hevc_nvenc (GPU)  •  CRF/QP 28  •  preset medium
+
+
+Added batch function:
+python convert_to_hevc.py /path/to/videos --batch 5
+```
+
+**How it works:**
+
+The script scans the full directory as normal, then slices the eligible H.264 files down to the first N before starting any conversions. Files are always processed in alphabetical order, so each run picks up the next N unconverted files naturally — since converted files are re-encoded to HEVC in-place, they'll be skipped on subsequent runs.
+
+The output makes it clear what was deferred:
+```
+  Batch limit: processing 5 of 23 eligible file(s)  (18 remaining for next run)
+  ...
+Finished — 5 converted, 0 errors  (18 file(s) deferred — re-run to continue)
+
+This pairs well with a cron job or Task Scheduler entry if you want to spread encoding across low-activity windows — just run with `--batch 5` nightly until the directory is fully converted. `--dry-run --batch N` also works to preview exactly which files would be picked up.
