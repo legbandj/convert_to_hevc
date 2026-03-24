@@ -115,7 +115,7 @@ Finished — 5 converted, 0 errors  (18 file(s) deferred — re-run to continue)
 This pairs well with a cron job or Task Scheduler entry if you want to spread encoding across low-activity windows — just run with `--batch 5` nightly until the directory is fully converted. `--dry-run --batch N` also works to preview exactly which files would be picked up.
 
 added:
-Use --recurse (or the shorthand -r):
+Use `--recurse` (or the shorthand `-r`):
 Usage: `python convert_to_hevc.py /path/to/videos --recurse`
 
 It works with all other flags too — for example, a recursive dry-run with a batch limit:
