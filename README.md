@@ -131,3 +131,17 @@ A couple of implementation details worth noting:
   [skip] TV/Show/ep01.mkv   (av1)
 Converting (1/4): TV/Show/ep02.mkv
 ```
+
+The script now handles two common classes of timecode fault:
+1. Faulty `tmcd` streams — H.264 files (especially those from cameras or capture cards) sometimes carry a `tmcd` (timecode) track with a wildly out-of-range `start_time`, which causes ffmpeg to error or produce output with broken timestamps. The pre-scan now inspects every stream, and if it finds a `tmcd` with a start time beyond ±24 hours it marks the file as affected. During conversion, instead of `-map 0` (copy all streams), it uses explicit per-type mapping (`-map 0:v -map 0:a? -map 0:s?`) to carry over video, audio, and subtitles while silently dropping the faulty timecode track.
+2. Negative timestamps — some files have a negative container `start_time`, which can cause certain muxers (especially MP4) to reject the output. When detected, `-avoid_negative_ts make_zero` is added to the ffmpeg command to rebase all timestamps to zero before encoding.
+
+Both fixups are detected during the pre-scan phase and flagged with a yellow warning so you know they're being applied before conversion starts:
+```
+  [warn] footage/clip.mp4  — faulty timecode stream detected, will be dropped
+  [warn] footage/raw.mp4   — negative timestamps detected, will rebase to zero
+```
+And they're noted on the completion line and in the log:
+```
+  ✔  Done in 01:23  1.2 GB → 820.4 MB  [dropped faulty tmcd]
+```

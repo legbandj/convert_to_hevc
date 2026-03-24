@@ -70,31 +70,74 @@ def check_nvenc_available() -> bool:
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def get_video_info(filepath: str) -> dict:
-    """Return {'codec': str, 'duration': float} for the first video stream."""
+    """
+    Return info about the file's streams:
+      codec      - video codec name of the first video stream
+      duration   - duration in seconds (float)
+      bad_tmcd   - True if a faulty timecode (tmcd) stream is present
+      has_neg_ts - True if the file has negative or near-zero start PTS
+    """
     cmd = [
         "ffprobe", "-v", "quiet",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=codec_name,duration:format=duration",
+        "-show_entries",
+        "stream=codec_name,codec_type,index,start_time:format=duration,start_time",
         "-of", "json",
         filepath,
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         data = json.loads(result.stdout)
-        codec = None
+        codec    = None
         duration = 0.0
+        bad_tmcd   = False
+        has_neg_ts = False
+
         streams = data.get("streams", [])
-        if streams:
-            codec = streams[0].get("codec_name")
-            if "duration" in streams[0]:
-                duration = float(streams[0]["duration"])
-        if duration == 0.0:
-            fmt_dur = data.get("format", {}).get("duration")
-            if fmt_dur:
-                duration = float(fmt_dur)
-        return {"codec": codec, "duration": duration}
+        for s in streams:
+            ctype = s.get("codec_type", "")
+            cname = s.get("codec_name", "")
+
+            # First video stream → grab codec and duration
+            if ctype == "video" and codec is None:
+                codec = cname
+                if "duration" in s:
+                    try:
+                        duration = float(s["duration"])
+                    except ValueError:
+                        pass
+
+            # Timecode streams with irrational start times are faulty
+            if cname == "tmcd":
+                st = s.get("start_time", "")
+                try:
+                    # A tmcd start_time that isn't close to 0 signals corruption
+                    if st and abs(float(st)) > 3600 * 24:
+                        bad_tmcd = True
+                except ValueError:
+                    bad_tmcd = True   # unparseable → treat as faulty
+
+        # Check container-level start time for negative PTS
+        fmt = data.get("format", {})
+        if duration == 0.0 and "duration" in fmt:
+            try:
+                duration = float(fmt["duration"])
+            except ValueError:
+                pass
+        fmt_start = fmt.get("start_time", "0")
+        try:
+            if float(fmt_start) < -0.1:
+                has_neg_ts = True
+        except ValueError:
+            pass
+
+        return {
+            "codec":      codec,
+            "duration":   duration,
+            "bad_tmcd":   bad_tmcd,
+            "has_neg_ts": has_neg_ts,
+        }
     except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, ValueError):
-        return {"codec": None, "duration": 0.0}
+        return {"codec": None, "duration": 0.0, "bad_tmcd": False, "has_neg_ts": False}
 
 
 def _term_width() -> int:
@@ -166,10 +209,14 @@ def convert_to_hevc(
     encoder: str,
     file_index: int,
     file_total: int,
+    bad_tmcd: bool = False,
+    has_neg_ts: bool = False,
 ) -> bool:
     """
     Transcode to HEVC with a live progress bar.
     Writes to a temp file, then atomically replaces the original.
+    bad_tmcd   - drop faulty tmcd streams instead of copying them
+    has_neg_ts - rebase negative timestamps to zero before encoding
     Returns True on success, False on failure.
     """
     filename  = os.path.basename(filepath)
@@ -194,13 +241,30 @@ def convert_to_hevc(
             "-preset", preset,
         ]
 
+    # Stream mapping: default is -map 0 (copy everything).
+    # If there's a bad timecode stream, map only the safe stream types explicitly
+    # so the faulty tmcd track is silently dropped.
+    if bad_tmcd:
+        map_args = [
+            "-map", "0:v",   # all video streams
+            "-map", "0:a?",  # all audio streams (optional — ok if absent)
+            "-map", "0:s?",  # all subtitle streams (optional)
+            # tmcd and other data streams are intentionally omitted
+        ]
+    else:
+        map_args = ["-map", "0"]
+
+    # Timestamp fixup: rebase negative PTS to zero so muxers don't choke.
+    ts_args = ["-avoid_negative_ts", "make_zero"] if has_neg_ts else []
+
     cmd = [
         "ffmpeg", "-y",
         "-i", filepath,
         *enc_args,
         "-c:a", "copy",
         "-c:s", "copy",
-        "-map", "0",
+        *map_args,
+        *ts_args,
         "-tag:v", "hvc1",
         "-progress", "pipe:2",  # write progress key=value pairs to stderr
         "-nostats",
@@ -303,10 +367,15 @@ def convert_to_hevc(
     os.replace(tmp_path, filepath)
     size_after    = _format_size(filepath)
     elapsed_total = time.monotonic() - start_time
+    fixups = []
+    if bad_tmcd:   fixups.append("dropped faulty tmcd")
+    if has_neg_ts: fixups.append("rebased negative timestamps")
+    fixup_note = f"  [{', '.join(fixups)}]" if fixups else ""
     print(GREEN(f"  ✔  Done in {_format_eta(elapsed_total)}  "
-                f"{size_before} → {size_after}"))
-    log.info("OK  %s  (%s → %s)  elapsed %s  encoder %s",
-             filepath, size_before, size_after, _format_eta(elapsed_total), encoder)
+                f"{size_before} → {size_after}{fixup_note}"))
+    log.info("OK  %s  (%s → %s)  elapsed %s  encoder %s%s",
+             filepath, size_before, size_after, _format_eta(elapsed_total),
+             encoder, fixup_note)
     return True
 
 
@@ -360,7 +429,13 @@ def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
         elif info["codec"].lower() not in ("h264", "avc"):
             to_skip.append((rel_path, info["codec"]))
         else:
-            to_convert.append((filepath, info["duration"]))
+            if info["bad_tmcd"]:
+                print(YELLOW(f"  [warn] {rel_path}  — faulty timecode stream detected, will be dropped"))
+                log.warning("Faulty tmcd stream detected: %s", filepath)
+            if info["has_neg_ts"]:
+                print(YELLOW(f"  [warn] {rel_path}  — negative timestamps detected, will rebase to zero"))
+                log.warning("Negative timestamps detected: %s", filepath)
+            to_convert.append((filepath, info["duration"], info["bad_tmcd"], info["has_neg_ts"]))
 
     print(f"  {GREEN(str(len(to_convert)))} file(s) to convert, "
           f"{YELLOW(str(len(to_skip)))} skipped\n")
@@ -386,8 +461,12 @@ def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
         print()
 
     if dry_run:
-        for fp, _ in to_convert:
-            print(YELLOW(f"  [dry-run] {os.path.basename(fp)}"))
+        for fp, _, bad_tmcd, has_neg_ts in to_convert:
+            flags = []
+            if bad_tmcd:   flags.append("drop-tmcd")
+            if has_neg_ts: flags.append("rebase-ts")
+            flag_str = f"  [{', '.join(flags)}]" if flags else ""
+            print(YELLOW(f"  [dry-run] {os.path.relpath(fp, directory)}{flag_str}"))
         if batch_size is not None and batch_size < total_eligible:
             print(DIM(f"  (+ {total_eligible - batch_size} more deferred by --batch)"))
         return
@@ -395,11 +474,12 @@ def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
     converted = errors = 0
     total     = len(to_convert)
 
-    for idx, (filepath, duration) in enumerate(to_convert, start=1):
-        fname = os.path.basename(filepath)
-        print(BOLD(f"Converting ({idx}/{total}): {fname}"))
+    for idx, (filepath, duration, bad_tmcd, has_neg_ts) in enumerate(to_convert, start=1):
+        rel_path = os.path.relpath(filepath, directory)
+        print(BOLD(f"Converting ({idx}/{total}): {rel_path}"))
         ok = convert_to_hevc(filepath, duration, crf=crf, preset=preset,
-                             encoder=encoder, file_index=idx, file_total=total)
+                             encoder=encoder, file_index=idx, file_total=total,
+                             bad_tmcd=bad_tmcd, has_neg_ts=has_neg_ts)
         if ok:
             converted += 1
         else:
