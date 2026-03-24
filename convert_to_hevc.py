@@ -271,6 +271,8 @@ def convert_to_hevc(
         tmp_path,
     ]
 
+    log.debug("ffmpeg command: %s", " ".join(cmd))
+
     # Reserve 3 blank lines for the progress block
     print("\n\n", end="", flush=True)
 
