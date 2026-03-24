@@ -3,7 +3,7 @@ Here's the script.
 
 It requires **ffmpeg** to be installed — that's the only dependency.
 
-### How it works:
+## How it works:
 
 1. Scans a directory for common video extensions (`.mp4`, `.mkv`, `.mov`, `.avi`, `.m4v`, `.ts`, `.mts`, `.m2ts`)
 2. Uses `ffprobe` to detect each file's video codec
@@ -11,18 +11,17 @@ It requires **ffmpeg** to be installed — that's the only dependency.
 4. Writes the output to a temp file first, then atomically replaces the original — so the filename stays identical and you never end up with a half-written file on failure
 5. Audio and subtitle streams are copied as-is (no re-encoding)
 
-### Basic usage:
-```
-bash
-# Convert files in the current directory
-python convert_to_hevc.py
+## Basic usage:
 
-# Convert files in a specific directory
-python convert_to_hevc.py /path/to/videos
+### Convert files in the current directory
+`python convert_to_hevc.py`
 
-# Preview what would be converted without doing anything
-python convert_to_hevc.py /path/to/videos --dry-run
-```
+### Convert files in a specific directory
+`python convert_to_hevc.py /path/to/videos`
+
+### Preview what would be converted without doing anything
+`python convert_to_hevc.py /path/to/videos --dry-run`
+
 
 Optional flags:
 |Flag | Default | Description |
@@ -30,8 +29,10 @@ Optional flags:
 | `--crf` | `28` |Quality (18–28 is typical; lower = better quality, larger file)|
 | `--preset` | `medium` |Speed vs compression tradeoff (fast, slow, veryslow, etc.)|
 | `--dry-run` | `off` |List candidates without converting|
-
-Tip: Run with --dry-run first to verify which files will be touched before committing to the conversion.
+| `--batch` | no default | limits processing to the batch size, scans as normal|
+| `--recurse` | no arguments | recurses through subdirectories in alphabetical order|
+| `--nvenc` | no arguments | leverages NVidia encoder if available|
+Tip: Run with `--dry-run` first to verify which files will be touched before committing to the conversion.
 
 
 ### Here's what's new in the updated script:
@@ -55,8 +56,8 @@ Other improvements:
 
 
 Adding logging function:
-python convert_to_hevc.py /path/to/videos --log-file conversion.log
-```
+
+Usage: `python convert_to_hevc.py /path/to/videos --log-file conversion.log`
 
 **What gets logged:**
 
@@ -77,10 +78,11 @@ python convert_to_hevc.py /path/to/videos --log-file conversion.log
 2026-03-22 14:03:10  ERROR     Conversion FAILED: /videos/broken.mp4  (ffmpeg exit code 1)
 2026-03-22 14:03:10  ERROR       ffmpeg: Invalid data found when processing input
 2026-03-22 14:03:10  INFO      Run complete — converted: 1  errors: 1  skipped: 1
-
-added optional nvenc:
-python convert_to_hevc.py /path/to/videos --nvenc
 ```
+
+## added optional nvenc support:
+usage: `python convert_to_hevc.py /path/to/videos --nvenc`
+
 
 A few things worth knowing about the implementation:
 
@@ -93,11 +95,11 @@ A few things worth knowing about the implementation:
 **Header display** — the encoder is shown in the startup line so it's always clear which path is being used:
 ```
 encoder hevc_nvenc (GPU)  •  CRF/QP 28  •  preset medium
+```
 
 
 Added batch function:
-python convert_to_hevc.py /path/to/videos --batch 5
-```
+usage: `python convert_to_hevc.py /path/to/videos --batch 5`
 
 **How it works:**
 
@@ -108,18 +110,18 @@ The output makes it clear what was deferred:
   Batch limit: processing 5 of 23 eligible file(s)  (18 remaining for next run)
   ...
 Finished — 5 converted, 0 errors  (18 file(s) deferred — re-run to continue)
+```
 
 This pairs well with a cron job or Task Scheduler entry if you want to spread encoding across low-activity windows — just run with `--batch 5` nightly until the directory is fully converted. `--dry-run --batch N` also works to preview exactly which files would be picked up.
 
 added:
 Use --recurse (or the shorthand -r):
-```
-python convert_to_hevc.py /path/to/videos --recurse
-```
+Usage: `python convert_to_hevc.py /path/to/videos --recurse`
+
 It works with all other flags too — for example, a recursive dry-run with a batch limit:
-```
-python convert_to_hevc.py /media/library --recurse --batch 10 --dry-run
-```
+
+`python convert_to_hevc.py /media/library --recurse --batch 10 --dry-run`
+
 
 A couple of implementation details worth noting:
 
