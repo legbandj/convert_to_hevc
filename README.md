@@ -1,7 +1,8 @@
 
 Here's the script.
 
-It requires **ffmpeg** to be installed — that's the only dependency.
+It requires **ffmpeg** to be installed — that's the primary dependency.
+If `ffmpeg` conversion fails and `HandBrakeCLI` / `handbrake-cli` is installed, the script will automatically retry with HandBrakeCLI to preserve resolution and playback quality.
 
 ## How it works:
 
@@ -83,6 +84,8 @@ Usage: `python convert_to_hevc.py /path/to/videos --log-file conversion.log`
 ## added optional nvenc support:
 usage: `python convert_to_hevc.py /path/to/videos --nvenc`
 
+## automatic HandBrakeCLI fallback:
+If `ffmpeg` fails during conversion and `HandBrakeCLI` or `handbrake-cli` is available, the script retries using HandBrakeCLI with `x265` and preserves resolution, aspect ratio, audio, and subtitles when possible.
 
 A few things worth knowing about the implementation:
 

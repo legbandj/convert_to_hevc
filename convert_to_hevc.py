@@ -10,7 +10,6 @@ Usage: python convert_to_hevc.py [directory]
 import os
 import sys
 import subprocess
-import json
 import shutil
 import tempfile
 import argparse
@@ -65,6 +64,77 @@ def check_nvenc_available() -> bool:
         return "hevc_nvenc" in result.stdout
     except subprocess.CalledProcessError:
         return False
+
+
+def find_handbrake_cli() -> str | None:
+    """Return the available HandBrakeCLI executable path, if any."""
+    for exe in ("HandBrakeCLI", "handbrake-cli"):
+        path = shutil.which(exe)
+        if path:
+            return path
+    return None
+
+
+def convert_with_handbrake(
+    filepath: str,
+    crf: int,
+    file_index: int,
+    file_total: int,
+) -> bool:
+    """Attempt a fallback HEVC conversion using HandBrakeCLI."""
+    hb_exec = find_handbrake_cli()
+    if hb_exec is None:
+        return False
+
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext not in (".mp4", ".mkv", ".m4v"):
+        log.warning("HandBrakeCLI fallback unavailable for %s (unsupported container)", filepath)
+        return False
+
+    size_before = _format_size(filepath)
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tmp" + ext,
+                                       dir=os.path.dirname(os.path.abspath(filepath)))
+    os.close(tmp_fd)
+
+    cmd = [
+        hb_exec,
+        "-i", filepath,
+        "-o", tmp_path,
+        "--encoder", "x265",
+        "--quality", str(crf),
+        "--auto-anamorphic",
+        "--keep-display-aspect",
+        "--all-audio",
+        "--aencoder", "copy",
+        "--all-subtitles",
+        "--optimize",
+    ]
+
+    log.info("HandBrakeCLI fallback command: %s", " ".join(cmd))
+    print(YELLOW("  [fallback] ffmpeg failed; attempting HandBrakeCLI conversion"))
+
+    try:
+        result = subprocess.run(cmd,
+                                capture_output=True,
+                                text=True,
+                                check=True)
+    except subprocess.CalledProcessError as exc:
+        print(RED("  [ERROR] HandBrakeCLI fallback failed"))
+        stderr_lines = (exc.stderr or "").splitlines()
+        for line in stderr_lines[-10:]:
+            if line:
+                print(DIM(f"    {line}"))
+        log.error("HandBrakeCLI fallback FAILED: %s  %s", filepath, exc.stderr.strip())
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        return False
+
+    os.replace(tmp_path, filepath)
+    size_after = _format_size(filepath)
+    print(GREEN(f"  ✔  HandBrakeCLI fallback succeeded  {size_before} → {size_after}"))
+    log.info("OK  %s  (HandBrakeCLI fallback)  (%s → %s)",
+             filepath, size_before, size_after)
+    return True
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -347,6 +417,10 @@ def convert_to_hevc(
     clear_progress()
 
     if return_code != 0:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        if convert_with_handbrake(filepath, crf, file_index, file_total):
+            return True
         print(RED(f"  [ERROR] ffmpeg exited with code {return_code}"))
         # Filter noisy progress lines; keep only human-readable diagnostic lines
         meaningful = [l for l in stderr_buf
@@ -361,8 +435,6 @@ def convert_to_hevc(
         log.error("Conversion FAILED: %s  (ffmpeg exit code %d)", filepath, return_code)
         for l in meaningful:
             log.error("  ffmpeg: %s", l)
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
         return False
 
     size_before = _format_size(filepath)
