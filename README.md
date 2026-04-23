@@ -85,7 +85,7 @@ Usage: `python convert_to_hevc.py /path/to/videos --log-file conversion.log`
 usage: `python convert_to_hevc.py /path/to/videos --nvenc`
 
 ## automatic HandBrakeCLI fallback:
-If `ffmpeg` fails during conversion and `HandBrakeCLI` or `handbrake-cli` is available, the script retries using HandBrakeCLI with `x265` and preserves resolution, aspect ratio, audio, and subtitles when possible.
+If `ffmpeg` fails during conversion and `HandBrakeCLI` or `handbrake-cli` is available, the script retries using HandBrakeCLI with `x265` and preserves resolution, aspect ratio, audio, and subtitles when possible. The fallback conversion displays the same live progress bar as ffmpeg, so you get real-time feedback on encoding progress, elapsed time, and ETA.
 
 A few things worth knowing about the implementation:
 

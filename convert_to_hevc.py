@@ -67,7 +67,7 @@ def check_nvenc_available() -> bool:
         return False
 
 
-def find_handbrake_cli() -> str | None:
+def find_handbrake_cli() -> str | None: # pyright: ignore[reportGeneralTypeIssues]
     """Return the available HandBrakeCLI executable path, if any."""
     for exe in ("HandBrakeCLI", "handbrake-cli"):
         path = shutil.which(exe)
@@ -83,7 +83,9 @@ def convert_with_handbrake(
     file_index: int,
     file_total: int,
 ) -> bool:
-    """Attempt a fallback HEVC conversion using HandBrakeCLI."""
+    """Attempt a fallback HEVC conversion using HandBrakeCLI with live progress."""
+    import re
+    
     hb_exec = find_handbrake_cli()
     if hb_exec is None:
         return False
@@ -130,27 +132,92 @@ def convert_with_handbrake(
     log.info("HandBrakeCLI fallback command: %s", " ".join(cmd))
     print(YELLOW("  [fallback] ffmpeg failed; attempting HandBrakeCLI conversion"))
 
+    # Reserve 3 blank lines for the progress block
+    print("\n\n", end="", flush=True)
+
+    start_time = time.monotonic()
+    last_pct   = 0.0
+    stderr_buf = []
+    proc       = None
+    filename   = os.path.basename(filepath)
+
+    def _handle_sigint(sig, frame):
+        if proc:
+            proc.terminate()
+        clear_progress()
+        print(RED("  Interrupted."))
+        sys.exit(1)
+
+    old_handler = signal.signal(signal.SIGINT, _handle_sigint)
+
     try:
-        result = subprocess.run(cmd,
-                                capture_output=True,
-                                text=True,
-                                check=True)
-    except subprocess.CalledProcessError as exc:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        # Regex pattern to extract progress from HandBrakeCLI output
+        # Examples: "Encoding: task 1 of 1, 45.23 %"
+        #           "Encoding: task 1 of 1, 45.23 % (12.34 fps, avg 12.12 fps)"
+        progress_pattern = re.compile(r"Encoding:.*?(\d+\.\d+)\s*%")
+
+        for raw_line in proc.stdout or []:
+            line = raw_line.rstrip()
+            stderr_buf.append(line)
+
+            # Try to extract progress percentage
+            match = progress_pattern.search(line)
+            if match:
+                pct = float(match.group(1))
+                last_pct = pct
+                elapsed = time.monotonic() - start_time
+
+                # Estimate speed and ETA based on progress
+                if pct > 0:
+                    speed = pct / elapsed if elapsed > 0 else 0
+                    remaining_pct = 100 - pct
+                    eta = remaining_pct / speed if speed > 0 else 0
+                    speed_fmt = f"{speed:.2f}"
+                else:
+                    eta = 0.0
+                    speed_fmt = "?"
+
+                if sys.stdout.isatty():
+                    draw_progress(filename, pct, elapsed, eta, speed_fmt,
+                                  file_index, file_total)
+
+        proc.wait()
+        return_code = proc.returncode
+
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
+
+    clear_progress()
+
+    if return_code != 0:
         print(RED("  [ERROR] HandBrakeCLI fallback failed"))
-        stderr_lines = (exc.stderr or "").splitlines()
-        for line in stderr_lines[-10:]:
-            if line:
-                print(DIM(f"    {line}"))
-        log.error("HandBrakeCLI fallback FAILED: %s  %s", filepath, exc.stderr.strip())
+        meaningful = [l for l in stderr_buf if l and not l.startswith(" ")]
+        tail = meaningful[-10:]
+        for l in tail:
+            if l.strip():
+                print(DIM(f"    {l}"))
+        log.error("HandBrakeCLI fallback FAILED: %s", filepath)
+        for l in meaningful:
+            log.error("  HandBrakeCLI: %s", l)
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
         return False
 
     os.replace(tmp_path, filepath)
     size_after = _format_size(filepath)
-    print(GREEN(f"  ✔  HandBrakeCLI fallback succeeded  {size_before} → {size_after}"))
-    log.info("OK  %s  (HandBrakeCLI fallback)  (%s → %s)",
-             filepath, size_before, size_after)
+    elapsed_total = time.monotonic() - start_time
+    print(GREEN(f"  ✔  HandBrakeCLI fallback succeeded in {_format_eta(elapsed_total)}  "
+                f"{size_before} → {size_after}"))
+    log.info("OK  %s  (HandBrakeCLI fallback)  (%s → %s)  elapsed %s",
+             filepath, size_before, size_after, _format_eta(elapsed_total))
     return True
 
 
@@ -388,7 +455,7 @@ def convert_to_hevc(
 
         current: dict = {}
 
-        for raw_line in proc.stderr:
+        for raw_line in proc.stderr: # type: ignore
             line = raw_line.rstrip()
             stderr_buf.append(line)
 
@@ -490,7 +557,7 @@ def collect_candidates(directory: str, recurse: bool) -> list[str]:
 # ── scanner ───────────────────────────────────────────────────────────────────
 
 def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
-                     dry_run: bool, batch_size: int | None, recurse: bool) -> None:
+                     dry_run: bool, batch_size: int | None, recurse: bool) -> None: # pyright: ignore[reportGeneralTypeIssues]
     if not os.path.isdir(directory):
         print(RED(f"[ERROR] Not a directory: {directory}"))
         log.error("Not a directory: %s", directory)
