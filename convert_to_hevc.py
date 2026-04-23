@@ -211,6 +211,20 @@ def convert_with_handbrake(
             os.remove(tmp_path)
         return False
 
+    # Sanity check: ensure output file is not empty
+    try:
+        if os.path.getsize(tmp_path) == 0:
+            print(RED("  [ERROR] HandBrakeCLI produced empty output file"))
+            log.error("HandBrakeCLI fallback produced 0-byte output: %s", filepath)
+            os.remove(tmp_path)
+            return False
+    except OSError as exc:
+        print(RED(f"  [ERROR] Cannot verify output file: {exc}"))
+        log.error("Error checking output file size: %s", exc)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        return False
+
     os.replace(tmp_path, filepath)
     size_after = _format_size(filepath)
     elapsed_total = time.monotonic() - start_time
@@ -519,6 +533,20 @@ def convert_to_hevc(
         log.error("Conversion FAILED: %s  (ffmpeg exit code %d)", filepath, return_code)
         for l in meaningful:
             log.error("  ffmpeg: %s", l)
+        return False
+
+    # Sanity check: ensure output file is not empty
+    try:
+        if os.path.getsize(tmp_path) == 0:
+            print(RED("  [ERROR] ffmpeg produced empty output file"))
+            log.error("ffmpeg produced 0-byte output: %s", filepath)
+            os.remove(tmp_path)
+            return False
+    except OSError as exc:
+        print(RED(f"  [ERROR] Cannot verify output file: {exc}"))
+        log.error("Error checking output file size: %s", exc)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
         return False
 
     size_before = _format_size(filepath)
