@@ -79,6 +79,7 @@ def find_handbrake_cli() -> str | None:
 def convert_with_handbrake(
     filepath: str,
     crf: int,
+    encoder: str,
     file_index: int,
     file_total: int,
 ) -> bool:
