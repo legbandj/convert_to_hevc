@@ -436,7 +436,7 @@ def convert_to_hevc(
     if return_code != 0:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        if convert_with_handbrake(filepath, crf, file_index, file_total):
+        if convert_with_handbrake(filepath, crf, encoder, file_index, file_total):
             return True
         print(RED(f"  [ERROR] ffmpeg exited with code {return_code}"))
         # Filter noisy progress lines; keep only human-readable diagnostic lines
