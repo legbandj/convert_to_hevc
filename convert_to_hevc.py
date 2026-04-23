@@ -103,7 +103,7 @@ def convert_with_handbrake(
             hb_exec,
             "-i", filepath,
             "-o", tmp_path,
-            "--encoder", "nvenc_x265",
+            "--encoder", "nvenc_h265",
             "--quality", str(crf),
             "--auto-anamorphic",
             "--keep-display-aspect",
