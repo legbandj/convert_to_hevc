@@ -97,19 +97,34 @@ def convert_with_handbrake(
                                        dir=os.path.dirname(os.path.abspath(filepath)))
     os.close(tmp_fd)
 
-    cmd = [
-        hb_exec,
-        "-i", filepath,
-        "-o", tmp_path,
-        "--encoder", "x265",
-        "--quality", str(crf),
-        "--auto-anamorphic",
-        "--keep-display-aspect",
-        "--all-audio",
-        "--aencoder", "copy",
-        "--all-subtitles",
-        "--optimize",
-    ]
+    if encoder == "hevc_nvenc":
+        cmd = [
+            hb_exec,
+            "-i", filepath,
+            "-o", tmp_path,
+            "--encoder", "nvenc_x265",
+            "--quality", str(crf),
+            "--auto-anamorphic",
+            "--keep-display-aspect",
+            "--all-audio",
+            "--aencoder", "copy",
+            "--all-subtitles",
+            "--optimize",
+        ]
+    else:
+        cmd = [
+            hb_exec,
+            "-i", filepath,
+            "-o", tmp_path,
+            "--encoder", "x265",
+            "--quality", str(crf),
+            "--auto-anamorphic",
+            "--keep-display-aspect",
+            "--all-audio",
+            "--aencoder", "copy",
+            "--all-subtitles",
+            "--optimize",
+        ]
 
     log.info("HandBrakeCLI fallback command: %s", " ".join(cmd))
     print(YELLOW("  [fallback] ffmpeg failed; attempting HandBrakeCLI conversion"))
