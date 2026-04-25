@@ -67,7 +67,7 @@ def check_nvenc_available() -> bool:
         return False
 
 
-def find_handbrake_cli() -> str | None: # pyright: ignore[reportGeneralTypeIssues]
+def find_handbrake_cli() -> str | None:
     """Return the available HandBrakeCLI executable path, if any."""
     for exe in ("HandBrakeCLI", "handbrake-cli"):
         path = shutil.which(exe)
@@ -469,7 +469,7 @@ def convert_to_hevc(
 
         current: dict = {}
 
-        for raw_line in proc.stderr: # type: ignore
+        for raw_line in proc.stderr:
             line = raw_line.rstrip()
             stderr_buf.append(line)
 
@@ -585,7 +585,7 @@ def collect_candidates(directory: str, recurse: bool) -> list[str]:
 # ── scanner ───────────────────────────────────────────────────────────────────
 
 def scan_and_convert(directory: str, crf: int, preset: str, encoder: str,
-                     dry_run: bool, batch_size: int | None, recurse: bool) -> None: # pyright: ignore[reportGeneralTypeIssues]
+                     dry_run: bool, batch_size: int | None, recurse: bool) -> None: 
     if not os.path.isdir(directory):
         print(RED(f"[ERROR] Not a directory: {directory}"))
         log.error("Not a directory: %s", directory)
